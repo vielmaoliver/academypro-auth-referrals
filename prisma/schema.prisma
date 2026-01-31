@@ -1,0 +1,63 @@
+// Prisma schema for AcademyPro referrals
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum CommissionStatus {
+  pending
+  available
+  paid
+}
+
+model User {
+  id               String   @id @default(uuid()) @db.Uuid
+  email            String   @unique
+  name             String?
+  pictureUrl       String?
+  provider         String   @default("authentik")
+  providerSub      String   @unique
+  referralCode     String   @unique
+  referredByUserId String?  @db.Uuid
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  referredBy       User?    @relation("UserReferrals", fields: [referredByUserId], references: [id])
+  referrals        User[]   @relation("UserReferrals")
+
+  referralAudits   ReferralAudit[] @relation("AuditUser")
+  referralSources  ReferralAudit[] @relation("AuditReferrer")
+
+  commissionSources       CommissionLedger[] @relation("CommissionSource")
+  commissionBeneficiaries CommissionLedger[] @relation("CommissionBeneficiary")
+}
+
+model ReferralAudit {
+  id               String   @id @default(uuid()) @db.Uuid
+  userId           String   @db.Uuid
+  referredByUserId String   @db.Uuid
+  codeUsed         String
+  createdAt        DateTime @default(now())
+
+  user             User     @relation("AuditUser", fields: [userId], references: [id])
+  referredBy       User     @relation("AuditReferrer", fields: [referredByUserId], references: [id])
+}
+
+model CommissionLedger {
+  id                 String            @id @default(uuid()) @db.Uuid
+  sourceUserId       String            @db.Uuid
+  beneficiaryUserId  String            @db.Uuid
+  level              Int
+  amountCents        Int
+  currency           String            @default("USD")
+  status             CommissionStatus  @default(pending)
+  createdAt          DateTime          @default(now())
+
+  sourceUser         User @relation("CommissionSource", fields: [sourceUserId], references: [id])
+  beneficiaryUser    User @relation("CommissionBeneficiary", fields: [beneficiaryUserId], references: [id])
+}

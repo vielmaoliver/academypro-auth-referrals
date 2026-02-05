@@ -1,1 +1,0 @@
-# academypro-auth-referrals

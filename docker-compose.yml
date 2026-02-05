@@ -1,5 +1,4 @@
-﻿version: "3.9"
-services:
+﻿services:
   postgres:
     image: postgres:16
     container_name: academypro-postgres
@@ -11,5 +10,7 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+
 volumes:
   pgdata:
+    name: academypro-auth-referrals_pgdata

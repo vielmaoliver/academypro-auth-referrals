@@ -3,3 +3,10 @@ node_modules
 .env
 
 /src/generated/prisma
+
+# backups / dumps
+*.sql
+backup_*.sql
+
+# local scratch folders (avoid committing by mistake)
+git/

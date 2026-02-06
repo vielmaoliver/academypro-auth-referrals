@@ -1,4 +1,4 @@
-type GoogleProfile = {
+export type GoogleProfile = {
   sub: string;
   email: string;
   name: string;
@@ -32,7 +32,6 @@ export async function exchangeCodeForProfile(code: string): Promise<GoogleProfil
   const clientSecret = requireEnv("GOOGLE_CLIENT_SECRET");
   const redirectUri = requireEnv("GOOGLE_REDIRECT_URI");
 
-  // 1) code -> tokens
   const tokenResp = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -41,32 +40,32 @@ export async function exchangeCodeForProfile(code: string): Promise<GoogleProfil
       client_id: clientId,
       client_secret: clientSecret,
       redirect_uri: redirectUri,
-      grant_type: "authorization_code",
-    }),
+      grant_type: "authorization_code"
+    })
   });
 
   const tokenJson: any = await tokenResp.json();
-  if (!tokenResp.ok) {
-    throw new Error(`Token exchange failed: ${JSON.stringify(tokenJson)}`);
-  }
+  if (!tokenResp.ok) throw new Error(`Token exchange failed: ${JSON.stringify(tokenJson)}`);
 
   const accessToken = tokenJson.access_token as string;
   if (!accessToken) throw new Error("No access_token returned by Google");
 
-  // 2) tokens -> profile (userinfo)
   const userResp = await fetch("https://openidconnect.googleapis.com/v1/userinfo", {
-    headers: { Authorization: `Bearer ${accessToken}` },
+    headers: { Authorization: `Bearer ${accessToken}` }
   });
 
   const userJson: any = await userResp.json();
-  if (!userResp.ok) {
-    throw new Error(`Userinfo failed: ${JSON.stringify(userJson)}`);
-  }
+  if (!userResp.ok) throw new Error(`Userinfo failed: ${JSON.stringify(userJson)}`);
 
-  return {
+  const profile: GoogleProfile = {
     sub: String(userJson.sub),
     email: String(userJson.email),
-    name: String(userJson.name || userJson.email),
-    pictureUrl: userJson.picture ? String(userJson.picture) : undefined,
+    name: String(userJson.name || userJson.email)
   };
+
+  if (userJson.picture) {
+    profile.pictureUrl = String(userJson.picture);
+  }
+
+  return profile;
 }

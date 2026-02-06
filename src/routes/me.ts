@@ -17,18 +17,19 @@ router.get("/me", requireUser, async (req, res) => {
     name?: string;
   };
 
+  const safeName = name ?? null;
+
   const user = await prisma.user.upsert({
     where: { providerSub: sub },
     create: {
       provider: "google",
       providerSub: sub,
       email,
-      name,
-      referralCode: generateReferralCode(),
+      name: safeName,
+      referralCode: generateReferralCode()
     },
-    update: { email, name },
+    update: { email, name: safeName }
   });
-
 
   res.json(user);
 });

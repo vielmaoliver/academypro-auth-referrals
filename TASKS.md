@@ -1,5 +1,11 @@
 # TASKS (Next)
 
+## SMOKE TEST (PowerShell) — antes y después de cada cambio
+1) Invoke-RestMethod http://localhost:3000/api/health
+2) Login Google -> obtener token
+3) $TOKEN="..."
+4) Invoke-RestMethod -Uri "http://localhost:3000/api/me" -Headers @{ Authorization = "Bearer $TOKEN" }
+
 ## 1) Referrals API (sin migraciones peligrosas)
 - Crear rutas:
   - `GET /api/referrals` -> listar mis referidos (users con referredByUserId = mi id)

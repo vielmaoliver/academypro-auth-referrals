@@ -1,16 +1,13 @@
 import { Router } from "express";
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
-import { prisma } from "../db/prisma";
-import { exchangeCodeForProfile, getGoogleAuthUrl } from "../auth/google";
+import { prisma } from "../db/prisma.js";
+import { exchangeCodeForProfile, getGoogleAuthUrl } from "../auth/google.js";
 
 const router = Router();
 
 function genReferralCode(len = 10) {
-  return crypto
-    .randomBytes(Math.ceil(len))
-    .toString("base64url")
-    .slice(0, len);
+  return crypto.randomBytes(Math.ceil(len)).toString("base64url").slice(0, len);
 }
 
 router.get("/auth/google/start", (req, res) => {
@@ -19,8 +16,8 @@ router.get("/auth/google/start", (req, res) => {
   res.cookie("oauth_state", state, {
     httpOnly: true,
     sameSite: "lax",
-    secure: false, // prod: true (https)
-    maxAge: 10 * 60 * 1000, // 10 min
+    secure: false,
+    maxAge: 10 * 60 * 1000
   });
 
   const url = getGoogleAuthUrl(state);
@@ -37,43 +34,36 @@ router.get("/auth/google/callback", async (req, res) => {
     if (!state) return res.status(400).send("Missing state");
     if (!cookieState || cookieState !== state) return res.status(400).send("Invalid state");
 
-    const profile = await exchangeCodeForProfile(code); // { sub, email, name, pictureUrl? }
+    const profile = await exchangeCodeForProfile(code);
 
     const user = await prisma.user.upsert({
       where: { providerSub: profile.sub },
       update: {
         email: profile.email,
-        name: profile.name,
+        name: profile.name ?? null,
         pictureUrl: profile.pictureUrl ?? null,
-        provider: "google",
+        provider: "google"
       },
       create: {
         provider: "google",
         providerSub: profile.sub,
         email: profile.email,
-        name: profile.name,
+        name: profile.name ?? null,
         pictureUrl: profile.pictureUrl ?? null,
         referralCode: genReferralCode(10),
-        referredByUserId: null,
-      },
+        referredByUserId: null
+      }
     });
 
+  const secret: jwt.Secret = process.env.JWT_SECRET ?? "dev-secret-local";
+  const expiresIn = process.env.JWT_EXPIRES_IN ?? "7d";
+  const token = jwt.sign({ uid: user.id }, secret, { expiresIn: expiresIn as any });
 
-    const secret = process.env.JWT_SECRET || "dev-secret-local";
-    const expiresIn = process.env.JWT_EXPIRES_IN || "7d";
-    const token = jwt.sign({ uid: user.id }, secret, { expiresIn });
-
-    // Limpieza del state cookie
     res.clearCookie("oauth_state");
 
     const frontend = process.env.FRONTEND_BASE_URL;
+    if (!frontend) return res.json({ ok: true, token, user });
 
-    // Si no hay frontend, devolvemos JSON (útil para backend-only y pruebas)
-    if (!frontend) {
-      return res.json({ ok: true, token, user });
-    }
-
-    // Si hay frontend, redirigimos
     return res.redirect(`${frontend}/auth/callback?token=${encodeURIComponent(token)}`);
   } catch (err) {
     console.error("OAuth callback error:", err);

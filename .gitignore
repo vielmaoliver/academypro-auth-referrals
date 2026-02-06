@@ -10,3 +10,5 @@ backup_*.sql
 
 # local scratch folders (avoid committing by mistake)
 git/
+dist/
+

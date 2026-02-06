@@ -9,6 +9,11 @@ const ClaimSchema = z.object({
   code: z.string().trim().min(1).max(64),
 });
 
+const AuditQuerySchema = z.object({
+  take: z.coerce.number().int().min(1).max(100).default(20),
+  skip: z.coerce.number().int().min(0).max(100000).default(0),
+});
+
 function generateReferralCode(): string {
   const ts = Date.now().toString(36);
   const rand = Math.random().toString(36).slice(2, 8);
@@ -97,6 +102,64 @@ router.get("/summary", requireUser, async (req, res) => {
       userId: user.id,
       referralCode: user.referralCode,
       referralsCount,
+    });
+  } catch (err) {
+    const msg = String((err as any)?.message || err);
+    if (msg.includes("unauthorized")) return res.status(401).json({ error: "unauthorized" });
+    return res.status(500).json({ error: "server_error" });
+  }
+});
+
+// GET /api/referrals/audit?take=20&skip=0
+router.get("/audit", requireUser, async (req, res) => {
+  try {
+    const me = await getOrCreateAuthedUser(req as any);
+
+    const parsed = AuditQuerySchema.safeParse(req.query);
+    if (!parsed.success) return res.status(400).json({ error: "invalid_query" });
+
+    const { take, skip } = parsed.data;
+
+    const outgoingCount = await prisma.referralAudit.count({
+      where: { referredByUserId: me.id },
+    });
+
+    const outgoing = await prisma.referralAudit.findMany({
+      where: { referredByUserId: me.id },
+      orderBy: { createdAt: "desc" },
+      take,
+      skip,
+      select: {
+        id: true,
+        userId: true,
+        referredByUserId: true,
+        codeUsed: true,
+        createdAt: true,
+      },
+    });
+
+    const incomingCount = await prisma.referralAudit.count({
+      where: { userId: me.id },
+    });
+
+    const incoming = await prisma.referralAudit.findMany({
+      where: { userId: me.id },
+      orderBy: { createdAt: "desc" },
+      take,
+      skip,
+      select: {
+        id: true,
+        userId: true,
+        referredByUserId: true,
+        codeUsed: true,
+        createdAt: true,
+      },
+    });
+
+    return res.json({
+      paging: { take, skip },
+      outgoing: { count: outgoingCount, items: outgoing },
+      incoming: { count: incomingCount, items: incoming },
     });
   } catch (err) {
     const msg = String((err as any)?.message || err);

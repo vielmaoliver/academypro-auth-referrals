@@ -1,8 +1,13 @@
 import { Router } from "express";
+import { z } from "zod";
 import { prisma } from "../db/prisma.js";
 import { requireUser } from "../middleware/auth.js";
 
 const router = Router();
+
+const ClaimSchema = z.object({
+  code: z.string().trim().min(1).max(64),
+});
 
 function generateReferralCode(): string {
   const ts = Date.now().toString(36);
@@ -11,7 +16,7 @@ function generateReferralCode(): string {
 }
 
 async function getOrCreateAuthedUser(req: any) {
-  const u = req.user as { id?: string; sub: string; email: string; name?: string };
+  const u = req.user as { id?: string; sub?: string; email?: string; name?: string };
 
   if (u?.id) {
     const user = await prisma.user.findUnique({ where: { id: u.id } });
@@ -19,9 +24,9 @@ async function getOrCreateAuthedUser(req: any) {
     return user;
   }
 
-  const sub = u?.sub || "";
-  const email = u?.email || "";
-  const safeName = u?.name ?? null;
+  const sub = u?.sub ?? "";
+  const email = u?.email ?? "";
+  const name = u?.name ?? null;
 
   if (!sub || !email) throw new Error("unauthorized");
 
@@ -31,47 +36,19 @@ async function getOrCreateAuthedUser(req: any) {
       provider: "google",
       providerSub: sub,
       email,
-      name: safeName,
+      name,
       referralCode: generateReferralCode(),
-      referredByUserId: null
+      referredByUserId: null,
+      pictureUrl: null,
     },
-    update: { email, name: safeName }
+    update: {
+      email,
+      name,
+    },
   });
 }
 
-async function handleClaim(req: any, res: any) {
-  const me = await getOrCreateAuthedUser(req);
-
-  const code = String(req.body?.code || "").trim();
-  if (!code) return res.status(400).json({ error: "code_required" });
-
-  const referrer = await prisma.user.findUnique({ where: { referralCode: code } });
-  if (!referrer) return res.status(404).json({ error: "code_not_found" });
-
-  if (referrer.id === me.id) return res.status(400).json({ error: "cannot_self_refer" });
-  if (me.referredByUserId) return res.status(400).json({ error: "already_referred" });
-
-  const updated = await prisma.user.update({
-    where: { id: me.id },
-    data: { referredByUserId: referrer.id }
-  });
-
-  await prisma.referralAudit.create({
-    data: {
-      userId: updated.id,
-      referredByUserId: referrer.id,
-      codeUsed: code
-    }
-  });
-
-  return res.json({
-    ok: true,
-    referredByUserId: referrer.id,
-    codeUsed: code
-  });
-}
-
-// ✅ TASKS alias: GET /api/referrals  -> listar mis referidos
+// GET /api/referrals -> listar mis referidos
 router.get("/", requireUser, async (req, res) => {
   try {
     const me = await getOrCreateAuthedUser(req as any);
@@ -83,61 +60,94 @@ router.get("/", requireUser, async (req, res) => {
         id: true,
         email: true,
         name: true,
-        createdAt: true
-      }
+        createdAt: true,
+      },
     });
 
     return res.json({ count: referrals.length, referrals });
-  } catch {
-    return res.status(401).json({ error: "unauthorized" });
+  } catch (err) {
+    const msg = String((err as any)?.message || err);
+    if (msg.includes("unauthorized")) return res.status(401).json({ error: "unauthorized" });
+    return res.status(500).json({ error: "server_error" });
   }
 });
 
-// ✅ existente
+// GET /api/referrals/my-code
 router.get("/my-code", requireUser, async (req, res) => {
   try {
     const user = await getOrCreateAuthedUser(req as any);
     return res.json({ referralCode: user.referralCode });
-  } catch {
-    return res.status(401).json({ error: "unauthorized" });
+  } catch (err) {
+    const msg = String((err as any)?.message || err);
+    if (msg.includes("unauthorized")) return res.status(401).json({ error: "unauthorized" });
+    return res.status(500).json({ error: "server_error" });
   }
 });
 
-// ✅ existente
+// GET /api/referrals/summary
 router.get("/summary", requireUser, async (req, res) => {
   try {
     const user = await getOrCreateAuthedUser(req as any);
 
     const referralsCount = await prisma.user.count({
-      where: { referredByUserId: user.id }
+      where: { referredByUserId: user.id },
     });
 
     return res.json({
       userId: user.id,
       referralCode: user.referralCode,
-      referralsCount
+      referralsCount,
     });
-  } catch {
-    return res.status(401).json({ error: "unauthorized" });
+  } catch (err) {
+    const msg = String((err as any)?.message || err);
+    if (msg.includes("unauthorized")) return res.status(401).json({ error: "unauthorized" });
+    return res.status(500).json({ error: "server_error" });
   }
 });
 
-// ✅ existente
-router.post("/claim", requireUser, async (req, res) => {
+async function handleClaim(req: any, res: any) {
   try {
-    return await handleClaim(req as any, res);
-  } catch {
-    return res.status(401).json({ error: "unauthorized" });
-  }
-});
+    const me = await getOrCreateAuthedUser(req);
 
-// ✅ TASKS alias: POST /api/referrals/apply -> mismo que claim
-router.post("/apply", requireUser, async (req, res) => {
-  try {
-    return await handleClaim(req as any, res);
-  } catch {
-    return res.status(401).json({ error: "unauthorized" });
+    const parsed = ClaimSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "invalid_body" });
+    const code = parsed.data.code;
+
+    const referrer = await prisma.user.findUnique({ where: { referralCode: code } });
+    if (!referrer) return res.status(404).json({ error: "code_not_found" });
+
+    if (referrer.id === me.id) return res.status(400).json({ error: "cannot_self_refer" });
+    if (me.referredByUserId) return res.status(400).json({ error: "already_referred" });
+
+    const updated = await prisma.user.update({
+      where: { id: me.id },
+      data: { referredByUserId: referrer.id },
+    });
+
+    await prisma.referralAudit.create({
+      data: {
+        userId: updated.id,
+        referredByUserId: referrer.id,
+        codeUsed: code,
+      },
+    });
+
+    return res.json({
+      ok: true,
+      referredByUserId: referrer.id,
+      codeUsed: code,
+    });
+  } catch (err) {
+    const msg = String((err as any)?.message || err);
+    if (msg.includes("unauthorized")) return res.status(401).json({ error: "unauthorized" });
+    return res.status(500).json({ error: "server_error" });
   }
-});
+}
+
+// POST /api/referrals/claim { code }
+router.post("/claim", requireUser, handleClaim);
+
+// POST /api/referrals/apply { code } (alias)
+router.post("/apply", requireUser, handleClaim);
 
 export default router;
